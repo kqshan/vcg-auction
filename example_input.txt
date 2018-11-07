@@ -1,0 +1,102 @@
+# Example input file explaining the specification format.
+# Lines starting with a pound sign are ignored by the parser.
+
+# First, the auctioneer lists the items for sale. This section must
+# begin with a line that reads "Items to sell:"
+ITEMS TO SELL:
+
+# Item names may contain numbers and symbols (except for &), but must
+# start with a letter of the alphabet (so "12-foot pole" is not okay).
+# Leading whitespace is ignored.
+    Twelve-foot pole
+    Tiny dining table
+
+# Duplicate names get counted as multiple copies of an item
+    Tiny chair
+    Tiny chair
+# You can also do this by starting the line with a number.
+  3 Tiny Potion of Climbing
+  2 Tiny Potion of Healing
+# Captialization doesn't matter, but we otherwise expect exact matches.
+# This means that "chair" and "chairs" are considered to be completely
+# different items. To avoid confusion, just don't pluralize anything.
+
+# End the list with a row of dashes (doesn't matter how many)
+---------------
+
+# Next, we have a section for each bidder.
+# First, a line starting with "Name:" defines the bidder name
+Name: Gwyndolin
+# And then we need a line that reads "Bids:"
+Bids:
+
+# Each bid is entered as a number (the bidded amount) and then an item name.
+  50     Twelve-foot pole
+   4.99  Tiny potion of healing
+# Remember: capitalization doesn't matter, white space before the item name
+# is ignored, and white space inside the item name must be an exact match.
+
+# Note that each bid is for a single item. So the above bid indicates that
+# the bidder only wants a single "tiny potion of healing", and is unwilling
+# to pay for any additional ones. Otherwise, enter multiple bids:
+   5     Tiny potion of climbing
+   2     Tiny potion of climbing
+   0.5   Tiny potion of climbing
+# This indicates that you are willing to pay 5 for a single potion, 5+2=7 for
+# two potions, or 7.5 for three potions. More detail on this mechanism later.
+
+# To bid on combinations of items, join the names using the & sign:
+  10     Tiny chair & Tiny chair
+  50     Tiny chair & Tiny chair & Tiny dining table
+# This indicates that you would pay 0 for a single chair or the dining table 
+# by itself (since you have not entered a bid on those items individually),
+# but are willing to pay 10 for both chairs or 50 for the entire set:
+#          Dining tables
+#               0    1
+#           +----------
+# Chairs 0  |   0    0
+#        1  |   0    0
+#        2  |  10   50
+
+# As before, end the list with an arbitrary number of dashes.
+------------
+
+# Here's another example
+Name: Tchok
+Bids:
+   0.1  Twelve foot pole
+   1    Tiny potion of climbing
+   5    Tiny potion of climbing & Tiny potion of climbing
+# This character misspelled "Twelve-foot pole" (forgot the hyphen), so that
+# bid is invalid. For the potions, we have explicit bids for a single potion
+# ($1) or a pair of potions ($5). We then infer that they would bid $6 for
+# 3 potions.
+--------
+
+# One last example
+Name: Gorkil
+Bids:
+   10   Tiny chair
+    5   Tiny chair
+   20   Tiny dining table
+   40   Tiny chair & tiny chair & tiny dining table
+# So this comes out to:
+#          Dining tables
+#               0    1
+#           +----------
+# Chairs 0  |   0   20
+#        1  |  10   30
+#        2  |  15   40
+# When it comes to the full set (table + 2 chairs), the explicit bid of 40
+# supersedes the inferred 10+5+20=35 that comes from summing the individual 
+# bids.
+--------
+
+# Okay, this is the last one I swear. Before the bids list (and either before
+# or after the name), you can also specify "Default bid:", which is how much
+# you bid on any generic item. The default is zero but you could change it
+# if you just want stuff without caring about what it is.
+Name: Bunnahabhain
+Default bid: 1
+Bids:
+-----
