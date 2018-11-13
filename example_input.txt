@@ -21,7 +21,7 @@ ITEMS TO SELL:
 # This means that "chair" and "chairs" are considered to be completely
 # different items. To avoid confusion, just don't pluralize anything.
 
-# End the list with a row of dashes (doesn't matter how many)
+# End the list with a row of dashes (at least 3)
 ---------------
 
 # Next, we have a section for each bidder.
@@ -35,6 +35,7 @@ Bids:
    4.99  Tiny potion of healing
 # Remember: capitalization doesn't matter, white space before the item name
 # is ignored, and white space inside the item name must be an exact match.
+# Decimal bids are okay, too.
 
 # Note that each bid is for a single item. So the above bid indicates that
 # the bidder only wants a single "tiny potion of healing", and is unwilling
