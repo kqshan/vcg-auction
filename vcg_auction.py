@@ -5,7 +5,6 @@ Vickrey-Clarke-Groves (VCG) auction.
 Kevin Shan, 2018-11-08
 """
 import re
-import math
 
             
 class Bidder:
@@ -14,14 +13,12 @@ class Bidder:
     Attributes:
         name        Name of the bidder
         default_bid Amount to implicitly bid on all items
-        budget      Maximum allowed to spend on all winning bids
         manual_bids List of manually-entered (item_list,bid_price)
     """
     
     def __init__(self):
         self.name = ''
         self.default_bid = 0.0
-        self.budget = math.inf
         self.manual_bids = list()
     
     def add_bid(self, items, bid):
@@ -38,7 +35,6 @@ class Bidder:
         if self.name:
             header += "Name: {}\n".format(self.name)
         header += "Default bid: {}\n".format(self.default_bid)
-        header += "Budget: {}\n".format(self.budget)
         header += "Manual bids:\n"
         header += "   Price  Items\n"
         lines = ['{:>8}  {}'.format(x[1],' & '.join(x[0]))
@@ -150,8 +146,6 @@ def parse_auction_specs(file):
             val = m.group(midx_val)
             if attr.startswith('name'):
                 this_bidder.name = val
-            elif attr.startswith('budget'):
-                this_bidder.budget = float(val)
             elif attr.startswith('default bid'):
                 this_bidder.default_bid = float(val)
             else:
