@@ -5,18 +5,23 @@ Vickrey-Clarke-Groves (VCG) auction.
 Kevin Shan, 2018-11-08
 """
 import re
+from collections import Counter
+from collections import namedtuple
+from collections import defaultdict
 
-            
+
 class Bidder:
     """A class indicating the bidders and their bids
     
     Attributes:
         name        Name of the bidder
-        manual_bids List of manually-entered (item_list,bid_price)
+        manual_bids List of manually-entered (items,price) bids
     """
     
-    def __init__(self):
-        self.name = ''
+    Bid = namedtuple('Bid',['items','price'])
+    
+    def __init__(self, name=""):
+        self.name = name
         self.manual_bids = list()
     
     def add_bid(self, items, bid):
@@ -26,15 +31,15 @@ class Bidder:
             items   List of item names indicating the combination being bid on
             bid     Bid price (float)
         """
-        self.manual_bids.append((items,bid))
-    
+        self.manual_bids.append(self.Bid(items,bid))
+        
     def __str__(self):
         header = ''
         if self.name:
             header += "Name: {}\n".format(self.name)
         header += "Manual bids:\n"
         header += "   Price  Items\n"
-        lines = ['{:>8}  {}'.format(x[1],' & '.join(x[0]))
+        lines = ['{:>8}  {}'.format(x.price,' & '.join(x.items))
                  for x in self.manual_bids]
         return header + '\n'.join(lines)
 
@@ -49,7 +54,7 @@ class Auction:
     
     def __init__(self):
         self.item_names = dict()
-        self.item_counts = dict()
+        self.item_counts = Counter()
     
     def add_item(self, name, qty=1):
         """Add an item to this auction
@@ -63,8 +68,56 @@ class Auction:
         key_name = name.lower()
         if key_name not in self.item_names:
             self.item_names[key_name] = name
-            self.item_counts[key_name] = 0
         self.item_counts[key_name] += qty
+    
+    def split_auction(self, bidders):
+        """Split this auction into sub-auctions based on item overlap in bids
+        
+        Args:
+            bidders     List of Bidder objects
+        Returns:
+            subauctions List of (Auction obj, list of Bidder objs)
+        """
+        # Start by creating a separate sub-auction for each unique item
+        Subauction = namedtuple('Subauction',['auction','bidders'])
+        item_sa_map = {item:Subauction({item},defaultdict(list))
+                       for item in self.item_names}
+        # Merge subauctions if a bid includes items from multiple subauctions
+        for bidder in bidders:
+            for bid in bidder.manual_bids:
+                # Find the subauction that includes these items
+                last_sa = None
+                for item in bid.items:
+                    curr_sa = item_sa_map[item]
+                    if (last_sa) and (curr_sa is not last_sa):
+                        # Merge last_sa into curr_sa
+                        curr_sa.auction.update(last_sa.auction)
+                        for name,bids in last_sa.bidders.items():
+                            curr_sa.bidders[name].extend(bids)
+                        for item in last_sa.auction:
+                            item_sa_map[item] = curr_sa
+                    last_sa = curr_sa
+                # Add this bid to that subauction
+                curr_sa.bidders[bidder.name].append(bid)
+        # Get the unique subauctions
+        subauctions = {id(sa):sa for sa in item_sa_map.values()}
+        subauctions = list(subauctions.values())
+        # Convert to the desired objects
+        for idx,sa in enumerate(subauctions):
+            # Convert the auction from a list of items to an Auction obj
+            auction = Auction()
+            for item in sa.auction:
+                auction.add_item(self.item_names[item], self.item_counts[item])
+            # Construct the Bidder list
+            bidders = list()
+            for name,bids in sa.bidders.items():
+                bidder = Bidder(name)
+                for bid in bids:
+                    bidder.add_bid(bid.items, bid.price)
+                bidders.append(bidder)
+            # Add this tuple to the subauction
+            subauctions[idx] = Subauction(auction, bidders)
+        return subauctions
     
     def __contains__(self, item):
         return item in self.item_names
@@ -98,8 +151,7 @@ def parse_auction_specs(file):
     parser_state = 'expecting item list'
     auction = Auction()
     bidders = []
-    this_bidder = Bidder()
-    this_bidder.name = "Bidder #{}".format(len(bidders)+1)
+    this_bidder = Bidder("Bidder #{}".format(len(bidders)+1))
     # Read each line of the file
     lineNo = 0;
     for line in file:
@@ -150,8 +202,7 @@ def parse_auction_specs(file):
             if line.startswith('---'):
                 # We're now done with this bidder; start a new one
                 bidders.append(this_bidder)
-                this_bidder = Bidder()
-                this_bidder.name = "Bidder #{}".format(len(bidders)+1)
+                this_bidder = Bidder("Bidder #{}".format(len(bidders)+1))
                 parser_state = 'bidder header'
                 continue
             # Parse the line
@@ -178,11 +229,18 @@ def parse_auction_specs(file):
         # Go on to the next line in the file
     # Reached end of file
     if parser_state == 'bidder header': # Everything is good
-        pass
+        if not bidders:
+            raise InputParseError("No bidders found")
     elif parser_state == 'bids':        # Forgat a closing "---"; that's okay
         bidders.append(this_bidder)
     else:
         raise InputParseError("Unexpected end of file")
+    # Check that the bidder names are unique
+    bidder_name_counts = Counter([b.name for b in bidders])
+    [most_common_bidder] = bidder_name_counts.most_common(1)
+    if (most_common_bidder[1] > 1):
+        raise InputParseError('Duplicate bidder "{}" found'
+                              .format(most_common_bidder[0]))
     # Return the auction and bidders
     return auction, bidders
 
