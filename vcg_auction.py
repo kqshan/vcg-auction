@@ -12,13 +12,11 @@ class Bidder:
     
     Attributes:
         name        Name of the bidder
-        default_bid Amount to implicitly bid on all items
         manual_bids List of manually-entered (item_list,bid_price)
     """
     
     def __init__(self):
         self.name = ''
-        self.default_bid = 0.0
         self.manual_bids = list()
     
     def add_bid(self, items, bid):
@@ -34,7 +32,6 @@ class Bidder:
         header = ''
         if self.name:
             header += "Name: {}\n".format(self.name)
-        header += "Default bid: {}\n".format(self.default_bid)
         header += "Manual bids:\n"
         header += "   Price  Items\n"
         lines = ['{:>8}  {}'.format(x[1],' & '.join(x[0]))
@@ -146,8 +143,6 @@ def parse_auction_specs(file):
             val = m.group(midx_val)
             if attr.startswith('name'):
                 this_bidder.name = val
-            elif attr.startswith('default bid'):
-                this_bidder.default_bid = float(val)
             else:
                 raise InputParseError(errmsg.format("a valid attribute name"))
         elif parser_state == 'bids':

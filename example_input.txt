@@ -92,12 +92,3 @@ Bids:
 # supersedes the inferred 10+5+20=35 that comes from summing the individual 
 # bids.
 --------
-
-# Okay, this is the last one I swear. Before the bids list (and either before
-# or after the name), you can also specify "Default bid:", which is how much
-# you bid on any generic item. The default is zero but you could change it
-# if you just want stuff without caring about what it is.
-Name: Bunnahabhain
-Default bid: 1
-Bids:
------
