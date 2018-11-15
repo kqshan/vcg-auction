@@ -175,8 +175,9 @@ class AuctionProblem:
                 idx_list = [item_idx[item] for item in bid.items]
                 bid_counts = np.bincount(idx_list, minlength=nItems)
                 if any(bid_counts > item_counts):
-                    raise ValueError("{}'s bid {} has too many items"
-                                     .format(bidder.name,bidder.items))
+                    print("{}'s bid of {} has too many items; ignoring"
+                          .format(bidder.name, bidder.items))
+                    continue
                 # value with items = value without items + bid price
                 endpts = item_counts - bid_counts + 1
                 src_slice = tuple(slice(None,n) for n in endpts)
