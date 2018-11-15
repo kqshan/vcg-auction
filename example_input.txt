@@ -92,3 +92,23 @@ Bids:
 # supersedes the inferred 10+5+20=35 that comes from summing the individual 
 # bids.
 --------
+
+# Okay, just one more. This is, unfortunately, to show that we do not yet
+# support non-supermodular bids. What does this mean? Suppose this bidder
+# just wants one potion of any kind, doesn't care which.
+Name: Bunnahabhain
+Bids:
+   10   Tiny potion of climbing
+   10   Tiny potion of healing
+   10   Tiny potion of climbing & Tiny potion of healing
+# So what he wanted was:       But what he's gonna get is:
+#        Healing potions                   Healing potions
+#                0    1                             0   10
+#             +--------                          +--------
+# Climbing  0 |  0   10              Climbing  0 |  0   10
+# potions   1 | 10   10              potions   1 | 10   20
+# This is because the current procedure for inferring composite bids by
+# summing the manually-entered bids does not allow a combination of items
+# to have a value that is less than the sum of the values of the items
+# individually, i.e. it enforces (weak) supermodularity.
+-------

@@ -8,7 +8,7 @@ import re
 from collections import Counter
 from collections import namedtuple
 from collections import defaultdict
-
+import numpy as np
 
 class Bidder:
     """A class indicating the bidders and their bids
@@ -127,6 +127,115 @@ class Auction:
         lines = ['{:>3}  {}'.format(self.item_counts[x],self.item_names[x]) 
                  for x in self.item_names]
         return header + '\n'.join(lines)
+
+
+
+class AuctionProblem:
+    """Auction problem that will be solved using an exhaustive search
+    
+    Attributes:
+        items       Ordered list of item names (lowercase)
+        bidders     Ordered list of bidder names
+        values      [N1+1 x N2+1 x ... x Nm+1 x B] valuations of all possible
+                    combinations of the m unique items by the B bidders. Each
+                    of the item dimensions corresponds to 0,1,...,Nm quantity
+    """
+    
+    def __init__(self, auction, bidders):
+        """Construct a new AuctionProblem from an auction and some bidders
+        
+        Args:
+            auction     Auction object
+            bidders     List of Bidder objects
+        
+        This populates self.items, .bidders, and .values
+        """
+        # Decide on the canonical order of items and bidders
+        items = auction.item_counts.most_common()
+        items = [x[0] for x in items]
+        bidder_names = [bidder.name for bidder in bidders]
+        # Make sure this isn't going to be too large
+        item_counts = [auction.item_counts[item] for item in items]
+        item_counts = np.array(item_counts, dtype=np.intp)
+        nBidders = len(bidders)
+        dims = item_counts + 1
+        if np.prod(dims)*nBidders > 100e6:
+            raise ValueError("Problem size {} is too large; aborting"
+                             .format(np.append(dims,nBidders)))
+        # Some helpers for the indexing
+        nItems = len(items)
+        item_idx = {item:items.index(item) for item in items}
+        # Create a [N1+1 x N2+1 x ... x Nm+1] array for each bidder
+        values = np.zeros(np.append(dims,nBidders), dtype=np.float32)
+        for bidder in bidders:
+            # Populate the value array for this bidder
+            v = np.zeros(dims, dtype=np.float32)
+            for bid in bidder.manual_bids:
+                # Count how many of each item is in this bid
+                idx_list = [item_idx[item] for item in bid.items]
+                bid_counts = np.bincount(idx_list, minlength=nItems)
+                if any(bid_counts > item_counts):
+                    raise ValueError("{}'s bid {} has too many items"
+                                     .format(bidder.name,bidder.items))
+                # value with items = value without items + bid price
+                endpts = item_counts - bid_counts + 1
+                src_slice = tuple(slice(None,n) for n in endpts)
+                tgt_slice = tuple(slice(n,None) for n in bid_counts)
+                v[tgt_slice] = np.maximum(v[tgt_slice], v[src_slice]+bid.price)
+            # Save it
+            b = bidder_names.index(bidder.name)
+            values[...,b] = v
+        # Update this object
+        self.items = items
+        self.bidders = bidder_names
+        self.values = values
+    
+    def __str__(self):
+        lines = []
+        # This table header gets used in both cases
+        N_a = self.values.shape[0]
+        table_header = ['{:_>7d}'.format(i) for i in range(N_a)]
+        table_header = '_'.join(table_header) + ' \u2190 ' + self.items[0]
+        # Special case if there's only one item
+        if len(self.items)==1:
+            width = max([len(x) for x in self.bidders])
+            lines.append(' '*width + '  ' + table_header)
+            for b,name in enumerate(self.bidders):
+                bidder = '{:>{width}s}'.format(name, width=width)
+                vals = ['{:7g}'.format(v) for v in self.values[:,b]]
+                lines.append(bidder + ': ' + ' '.join(vals))
+            return '\n'.join(lines)
+        # Print each bidder in their own section
+        for b,name in enumerate(self.bidders):
+            lines.append("{}:".format(name))
+            v_bidder = self.values[...,b]
+            # Flatten this to 3 dimensions
+            item_b = self.items[1]
+            items_c = self.items[2:]
+            N_b = v_bidder.shape[1]
+            shape_c = v_bidder.shape[2:]
+            nPages = np.prod(shape_c, dtype=np.int)
+            v_bidder.shape = (N_a, N_b, nPages)
+            # Produce 2-D tables in a loop over the 3rd dimension
+            for p in range(nPages):
+                # Display the page info
+                indent = '    '
+                if (nPages > 1):
+                    idx = np.unravel_index(p, shape_c)
+                    line = ["{} {}".format(*x) for x in zip(idx,items_c)]
+                    lines.append(indent + ', '.join(line))
+                    indent += '    '
+                v_page = v_bidder[:,:,p]
+                # Display the header
+                lines.append(indent + '\u256d\u2500 ' + item_b)
+                lines.append(indent + '\u2193 ' + table_header)
+                # Display the values
+                for b in range(N_b):
+                    vals = ['{:7g}'.format(v) for v in v_page[:,b]]
+                    lines.append(indent + '{}|'.format(b) + ' '.join(vals))
+            # Add a separator between bidders
+            lines.append('-'*80)
+        return '\n'.join(lines)
 
 
 
