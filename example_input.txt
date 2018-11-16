@@ -48,16 +48,16 @@ Bids:
 
 # To bid on combinations of items, join the names using the & sign:
   10     Tiny chair & Tiny chair
-  50     Tiny chair & Tiny chair & Tiny dining table
+  30     Tiny chair & Tiny chair & Tiny dining table
 # This indicates that you would pay 0 for a single chair or the dining table 
 # by itself (since you have not entered a bid on those items individually),
-# but are willing to pay 10 for both chairs or 50 for the entire set:
+# but are willing to pay 10 for both chairs or 30 for the entire set:
 #          Dining tables
 #               0    1
 #           +----------
 # Chairs 0  |   0    0
 #        1  |   0    0
-#        2  |  10   50
+#        2  |  10   30
 
 # As before, end the list with an arbitrary number of dashes.
 ------------
