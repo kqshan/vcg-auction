@@ -11,7 +11,9 @@ from collections import namedtuple
 from collections import defaultdict
 import numpy as np
 import datetime
+import random
 import argparse
+import sys
 
 class Bidder:
     """A class indicating the bidders and their bids
@@ -138,8 +140,9 @@ class AuctionProblem:
     
     Attributes:
         items       List of item names (lowercase)
-        bidders     List of bidder names
+        bidders     List of Bidder objects
         item_counts Item counts (same order as in "items")
+        item_names  Item names (same order as in "items")
         values      [B x N1+1 x N2+1 x ... x Nm+1] valuations for all combos
                     of the m unique items by each of the B bidders
     """
@@ -153,10 +156,9 @@ class AuctionProblem:
         
         This populates self.items, .bidders, and .values
         """
-        # Decide on the canonical order of items and bidders
+        # Decide on the canonical order of items
         items = auction.item_counts.most_common()
         items = [x[0] for x in items]
-        bidder_names = [bidder.name for bidder in bidders]
         # Make sure this isn't going to be too large
         item_counts = [auction.item_counts[item] for item in items]
         item_counts = np.array(item_counts, dtype=np.intp)
@@ -171,7 +173,7 @@ class AuctionProblem:
         item_idx = {item:items.index(item) for item in items}
         # Create a [N1+1 x N2+1 x ... x Nm+1] array for each bidder
         values = np.zeros(np.hstack((nBidders,dims)), dtype=np.float32)
-        for bidder in bidders:
+        for b,bidder in enumerate(bidders):
             # Populate the value array for this bidder
             v = np.zeros(dims, dtype=np.float32)
             for bid in bidder.manual_bids:
@@ -188,20 +190,25 @@ class AuctionProblem:
                 tgt_slice = tuple(slice(n,None) for n in bid_counts)
                 v[tgt_slice] = np.maximum(v[tgt_slice], v[src_slice]+bid.price)
             # Save it
-            b = bidder_names.index(bidder.name)
             values[b,...] = v
         # Update this object
         self.items = items
-        self.bidders = bidder_names
+        self.bidders = bidders
         self.values = values
         self.item_counts = item_counts
+        self.item_names = [auction.item_names[item] for item in items]
         # And some private fields
         dims_right = np.append(dims[1:],1)
         self._value_array_strides = np.cumprod(dims_right[::-1])[::-1]
         self._bidder_strides = np.array(range(nBidders)) * nCases
     
     def get_value(self, alloc):
-        """Return the value of a given Allocation object
+        """Return the value each bidder sees for a given Allocation object
+
+        Args:
+            alloc   Allocation object
+        Returns:
+            val     [#bidders] array of value incurred by each bidder
         """
         # alloc.counts is a [#bidders x #items] matrix, and
         # self._value_array_strides is a [#items] vector indicating the stride
@@ -209,31 +216,31 @@ class AuctionProblem:
         case_indices = np.matmul(alloc.counts, self._value_array_strides)
         # Now add the offsets for each of the bidders
         case_indices += self._bidder_strides
-        # Look these up in the value array and sum the result
-        return np.sum(self.values.flat[case_indices])
+        # Look these up in the value array
+        return self.values.flat[case_indices]
     
     def __str__(self):
         lines = []
         # This table header gets used in both cases
         N_a = self.values.shape[1]
         table_header = ['{:_>7d}'.format(i) for i in range(N_a)]
-        table_header = '_'.join(table_header) + ' \u2190 ' + self.items[0]
+        table_header = '_'.join(table_header) + ' \u2190 ' + self.item_names[0]
         # Special case if there's only one item
         if len(self.items)==1:
-            width = max([len(x) for x in self.bidders])
+            width = max([len(x.name) for x in self.bidders])
             lines.append(' '*width + '  ' + table_header)
-            for b,name in enumerate(self.bidders):
-                bidder = '{:>{width}s}'.format(name, width=width)
+            for b,bidder in enumerate(self.bidders):
+                name = '{:>{width}s}'.format(bidder.name, width=width)
                 vals = ['{:7g}'.format(v) for v in self.values[b,:]]
-                lines.append(bidder + ': ' + ' '.join(vals))
+                lines.append(name + ': ' + ' '.join(vals))
             return '\n'.join(lines)
         # Print each bidder in their own section
-        for b,name in enumerate(self.bidders):
-            lines.append("{}:".format(name))
+        for b,bidder in enumerate(self.bidders):
+            lines.append("{}:".format(bidder.name))
             v_bidder = self.values[b,...]
             # Flatten this to 3 dimensions
-            item_b = self.items[1]
-            items_c = self.items[2:]
+            item_b = self.item_names[1]
+            items_c = self.item_names[2:]
             N_b = v_bidder.shape[1]
             shape_c = v_bidder.shape[2:]
             nPages = np.prod(shape_c, dtype=np.int)
@@ -256,7 +263,8 @@ class AuctionProblem:
                     vals = ['{:7g}'.format(v) for v in v_page[:,b]]
                     lines.append(indent + '{}|'.format(b) + ' '.join(vals))
             # Add a separator between bidders
-            lines.append('-'*80)
+            if (nPages > 1):
+                lines.append('-'*80)
         return '\n'.join(lines)
 
 
@@ -303,7 +311,7 @@ class AuctionSolver:
         best_val    Best overall value seen so far
         best_val_wo [#bidders] array of best overall value without each bidder
     """
-    def __init__(self, problem, verbose=True):
+    def __init__(self, problem):
         # Define the public attributes
         self.problem = problem
         self.seen_allocs = set()
@@ -312,19 +320,132 @@ class AuctionSolver:
         nBidders = len(problem.bidders)
         nItems = len(problem.items)
         self.best_val_wo = np.full(nBidders, -np.inf, dtype=np.float32)
-        # Define some private attribets
+        # Define some private attributes
         self._nBidders = nBidders
         self._nItems = nItems
         self._item_counts = problem.item_counts
+        self._solved = False
+
+    def solve(self, verbose=False):
+        """Solve the auction allocation problem
+
+        Args:
+            verbose     Display search progress
+
+        See also: get_solution()
+        """
+        if self._solved:
+            return
         self._verbose = verbose
         # Perform the search
         if self._verbose:
             print("{}: Started search".format(datetime.datetime.now()))
-        starting_alloc = Allocation(np.zeros((nBidders,nItems), dtype=np.int))
+        starting_alloc = np.zeros((self._nBidders,self._nItems), dtype=np.int)
+        starting_alloc = Allocation(starting_alloc)
         self.explore(starting_alloc)
         if self._verbose:
             print("{}: Finished search (checked {} cases)"
                   .format(datetime.datetime.now(), len(self.seen_allocs)) )
+        self._solved = True
+
+    def get_solution(self):
+        """Return an optimal solution to this auction problem
+
+        Returns:
+            soln    AuctionSolution object
+            why     String explanining the reasoning behind the solution
+        """
+        self.solve()
+        alloc,why_picked = self._pick_alloc()
+        prices,why_price = self._set_prices(alloc)
+        # Construct an AuctionSolution object
+        soln = AuctionSolution.from_allocation(alloc, prices, self.problem)
+        why = why_picked + '\n' + why_price
+        return soln,why
+
+    def _pick_alloc(self):
+        """Break any ties and pick a single solution from the best_alloc list
+
+        Returns:
+            alloc   Allocation object from the best_alloc list
+            why     String explaining why this was chosen
+
+        This breaks ties using the following procedure:
+        * Priority is given to any allocations that minimize the number of items
+          given out, so that bidders are not given items they are indifferent to
+        * After that, priority is given to allocations that maximize the number
+          of bidders receiving items, so there is a measure of equitability
+        * Otherwise, an allocation is picked randomly
+        """
+        assert self._solved, "This should be called after solving the problem"
+        assert self.best_alloc, "Somehow best_alloc is empty?!"
+        why = list()
+        # Special case if there is only one solution
+        allocs = self.best_alloc
+        if len(allocs)==1:
+            why.append("Only 1 allocation achieves the maximum overall value")
+            return allocs[0],'\n'.join(why)
+        why.append("{} allocations are tied for best".format(len(allocs)))
+        # Give priority to allocations that minimize the number of items
+        total_counts = [np.sum(a.counts) for a in allocs]
+        min_count = min(total_counts)
+        old_len = len(allocs)
+        allocs = [allocs[i] for i,n in enumerate(total_counts) if n==min_count]
+        if len(allocs) < old_len:
+            why.append("{} eliminated because they allocate unnecessary items"
+                       .format(old_len-len(allocs)) )
+        # Then give priority to those that maximize the emptyhanded bidders
+        empty_counts = [len(a.emptyhanded()) for a in allocs]
+        min_count = min(empty_counts)
+        old_len = len(allocs)
+        allocs = [allocs[i] for i,n in enumerate(empty_counts) if n==min_count]
+        if len(allocs) < old_len:
+            why.append("{} eliminated for equitablility reasons"
+                       .format(old_len-len(allocs)) )
+        # And finally, pick randomly
+        if len(allocs)==1:
+            why.append("Leaving only 1 allocation remaining")
+            alloc = allocs[0]
+        else:
+            why.append("Picking randomly from the {} remaining"
+                       .format(len(allocs)))
+            alloc = random.choice(allocs)
+        return alloc,'\n'.join(why)
+
+    def _set_prices(self, alloc):
+        """Set the prices based on a single optimal allocation
+
+        Args:
+            alloc   Allocation object
+        Returns:
+            prices  [#bidders] array of prices paid by each bidder
+            why     String explaining how these prices were set
+        """
+        assert self._solved, "This should be called after solving the problem"
+        prices = np.zeros(self._nBidders, dtype=np.float32)
+        why = list();
+        # Print a header
+        total_val = self.best_val
+        why.append("This allocation achieves an overall social value of {}"
+                   .format(total_val))
+        width = max([len(x.name) for x in self.problem.bidders])
+        width = max(width, len("Bidder name"))
+        why.append("  {:<{width}s}  v_self  v_others  v_without  price"
+                   .format("Bidder name",width=width))
+        fmt = "  {:>{width}s}  {:6g}  {:8g}  {:9g}  {:5g}"
+        # Find the "harm" incurred by each of the winning bidders
+        bidder_vals = self.problem.get_value(alloc)
+        for b,bidder in enumerate(self.problem.bidders):
+            # Find the value to others under this allocation
+            v_self = bidder_vals[b]
+            v_others = total_val - v_self
+            # Get the best value to others if this bidder didn't exist
+            v_without = self.best_val_wo[b]
+            # Use this to set the price
+            prices[b] = v_without - v_others
+            why.append(fmt.format(bidder.name, v_self, v_others, v_without,
+                                  prices[b], width=width))
+        return prices,'\n'.join(why)
     
     def explore(self, alloc):
         """Recursive function to perform a depth-first search over allocations
@@ -351,7 +472,7 @@ class AuctionSolver:
         which allocations we've seen and the best so far"""
         self.seen_allocs.add(alloc.to_hashable())
         # Check if this is the best so far
-        val = self.problem.get_value(alloc)
+        val = np.sum(self.problem.get_value(alloc))
         if val > self.best_val:
             self.best_val = val
             self.best_alloc = [alloc]
@@ -367,6 +488,88 @@ class AuctionSolver:
             if n % 10000 == 0:
                 print("{}: Checked {} possible cases so far"
                       .format(datetime.datetime.now(),n) )
+
+
+
+class AuctionSolution:
+    """Class representing a solution to an auction problem
+
+    Attributes:
+        takeaways   {bidder_name:({item:count},price)} items sold to bidders
+        leftover    {item:count} items leftover at the auction house
+    """
+    Takeaway = namedtuple('Takeaway',['item_count','price'])
+
+    def __init__(self, takeaways=dict(), leftover=Counter()):
+        self.takeaways = takeaways
+        self.leftover = leftover
+
+    @staticmethod
+    def from_allocation(alloc, prices, problem):
+        """Construct an AuctionSolution object from an Allocation object
+
+        Args:
+            alloc       Allocation object
+            prices      [#bidders] list of prices for each bidder
+            problem     AuctionProblem object
+        Returns:
+            solution    AuctionSolution object
+        """
+        # Construct the takeaways dict
+        takeaways = dict()
+        for b,bidder in enumerate(problem.bidders):
+            # Count the items
+            item_count = Counter()
+            for i,item in enumerate(problem.item_names):
+                if alloc.counts[b,i] > 0:
+                    item_count[item] = alloc.counts[b,i]
+            # Skip this bidder if she didn't win items
+            if not item_count:
+                assert prices[b]==0, "Nonzero price for non-winning bidder"
+                continue
+            # Add her to the dict
+            take = AuctionSolution.Takeaway(item_count,prices[b])
+            takeaways[bidder.name] = take
+        # Count the leftovers
+        leftover_count = problem.item_counts - np.sum(alloc.counts,0)
+        leftover = Counter()
+        for i,item in enumerate(problem.items):
+            if leftover_count[i] > 0:
+                leftover[item] = leftover_count[i]
+        # Construct the object
+        return AuctionSolution(takeaways, leftover)
+    
+    def update(self, other):
+        """Merge another AuctionSolution object into this one
+
+        Args:
+            other       AuctionSolution object to merge into this one
+        """
+        for bidder,take in other.takeaways.items():
+            if bidder in self.takeaways:
+                old_takeaway = self.takeaways[bidder]
+                item_counts = old_takeaway.item_count
+                # This ends up modifying old_takeaway.item_count, but that's ok
+                item_counts.update(take.item_count)
+                price = old_takeaway.price + take.price
+                new_takeaway = AuctionSolution.Takeaway(item_counts,price)
+                self.takeaways[bidder] = new_takeaway
+            else:
+                self.takeaways[bidder] = take
+        self.leftover.update(other.leftover)
+
+    def __str__(self):
+        lines = list()
+        for name,take in self.takeaways.items():
+            lines.append("{} pays {:.6g} for:".format(name,take.price))
+            for item,count in take.item_count.items():
+                lines.append("{:>5}  {}".format(count,item))
+        if self.leftover:
+            lines.append("Leftover at the auction house:")
+            for item,count in self.leftover.items():
+                lines.append("{:>5}  {}".format(count,item))
+        return '\n'.join(lines)
+
 
 
 def parse_auction_specs(file):
@@ -510,17 +713,36 @@ def run_auction(file, verbose=0):
     # Split this into sub-auctions
     subauctions = auction.split_auction(bidders)
     if verbose:
-        print("Able to split this into {} independent sub-auctions"
+        print("Able to split this into {} independent sub-auctions\n"
               .format(len(subauctions)) )
-    problems = [AuctionProblem(x.auction,x.bidders) for x in subauctions]
     # Solve the sub-auctions
-    for i,p in enumerate(problems):
+    solutions = list()
+    for i,subauc in enumerate(subauctions):
+        # Construct the AuctionProblem, filling in the inferred bids
+        prob = AuctionProblem(subauc.auction, subauc.bidders)
         if verbose:
-            print("Problem {}:".format(i+1))
-        solution = AuctionSolver(p, verbose=more_verbose)
+            contents = ["{} {}".format(count,name) 
+                        for name,count in zip(prob.item_names,prob.item_counts)]
+            print("Problem {}: ".format(i+1) + ", ".join(contents))
+        if more_verbose:
+            print(prob)
+        # Solve the problem
+        solver = AuctionSolver(prob)
+        solver.solve(verbose=more_verbose)
+        solution,explanation = solver.get_solution()
         if verbose:
-            print("I solved it I swear")
-
+            print(solution)
+        if more_verbose:
+            print(explanation)
+            print('='*80)
+        if verbose:
+            print()
+        solutions.append(solution)
+    # Merge the solutions
+    solution = AuctionSolution()
+    for soln in solutions:
+        solution.update(soln)
+    print(solution)
 
 
 if __name__ == '__main__':
@@ -535,3 +757,4 @@ if __name__ == '__main__':
     # Call the main function
     file = open(args.infile,'r')
     run_auction(file, verbose=args.verbose)
+    sys.exit(0)
