@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
 Vickrey-Clarke-Groves (VCG) auction.
@@ -10,6 +11,7 @@ from collections import namedtuple
 from collections import defaultdict
 import numpy as np
 import datetime
+import argparse
 
 class Bidder:
     """A class indicating the bidders and their bids
@@ -321,7 +323,7 @@ class AuctionSolver:
         starting_alloc = Allocation(np.zeros((nBidders,nItems), dtype=np.int))
         self.explore(starting_alloc)
         if self._verbose:
-            print("{}: Finished search after checking {} possible allocations"
+            print("{}: Finished search (checked {} cases)"
                   .format(datetime.datetime.now(), len(self.seen_allocs)) )
     
     def explore(self, alloc):
@@ -363,7 +365,7 @@ class AuctionSolver:
         if self._verbose:
             n = len(self.seen_allocs)
             if n % 10000 == 0:
-                print("{}: Checked {} possible allocations so far"
+                print("{}: Checked {} possible cases so far"
                       .format(datetime.datetime.now(),n) )
 
 
@@ -487,3 +489,49 @@ class InputParseError(ValueError):
     """An exception class indicating that we could not parse the input text
     """
     pass
+
+
+
+def run_auction(file, verbose=0):
+    """Run an auction given a file
+    """
+    more_verbose = (verbose >= 2)
+    # Parse the input
+    auction,bidders = parse_auction_specs(file)
+    if verbose:
+        print("Found {} unique items and {} bidders"
+              .format(len(auction.item_names), len(bidders)) )
+    if more_verbose:
+        print(auction)
+        for b in bidders:
+            print('-'*10)
+            print(b)
+        print('='*80)
+    # Split this into sub-auctions
+    subauctions = auction.split_auction(bidders)
+    if verbose:
+        print("Able to split this into {} independent sub-auctions"
+              .format(len(subauctions)) )
+    problems = [AuctionProblem(x.auction,x.bidders) for x in subauctions]
+    # Solve the sub-auctions
+    for i,p in enumerate(problems):
+        if verbose:
+            print("Problem {}:".format(i+1))
+        solution = AuctionSolver(p, verbose=more_verbose)
+        if verbose:
+            print("I solved it I swear")
+
+
+
+if __name__ == '__main__':
+    """Entry point if running this module from the shell"""
+    parser = argparse.ArgumentParser(description="Parse an input file " +
+        "with items/bids and print the optimal allocation and prices")
+    parser.add_argument('infile', help="Input file " + 
+        "(see example_input.txt for an explanation of the format)")
+    parser.add_argument('-v','--verbose', action='count', default=0,
+        help="Enable verbose output (more v's = more verbosity)")
+    args = parser.parse_args()
+    # Call the main function
+    file = open(args.infile,'r')
+    run_auction(file, verbose=args.verbose)
