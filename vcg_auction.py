@@ -200,7 +200,7 @@ class AuctionProblem:
         # And some private fields
         dims_right = np.append(dims[1:],1)
         self._value_array_strides = np.cumprod(dims_right[::-1])[::-1]
-        self._bidder_strides = np.array(range(nBidders)) * nCases
+        self._bidder_strides = np.array(range(nBidders), dtype=np.intp) * nCases
     
     def get_value(self, alloc):
         """Return the value each bidder sees for a given Allocation object
@@ -227,7 +227,7 @@ class AuctionProblem:
         table_header = '_'.join(table_header) + ' \u2190 ' + self.item_names[0]
         # Special case if there's only one item
         if len(self.items)==1:
-            width = max([len(x.name) for x in self.bidders])
+            width = max([len(x.name) for x in self.bidders], default=8)
             lines.append(' '*width + '  ' + table_header)
             for b,bidder in enumerate(self.bidders):
                 name = '{:>{width}s}'.format(bidder.name, width=width)
@@ -428,7 +428,7 @@ class AuctionSolver:
         total_val = self.best_val
         why.append("This allocation achieves an overall social value of {}"
                    .format(total_val))
-        width = max([len(x.name) for x in self.problem.bidders])
+        width = max([len(x.name) for x in self.problem.bidders], default=8)
         width = max(width, len("Bidder name"))
         why.append("  {:<{width}s}  v_self  v_others  v_without  price"
                    .format("Bidder name",width=width))
