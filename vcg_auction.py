@@ -742,6 +742,8 @@ def run_auction(file, verbose=0):
     solution = AuctionSolution()
     for soln in solutions:
         solution.update(soln)
+    if verbose:
+        print("In conclusion:")
     print(solution)
 
 
