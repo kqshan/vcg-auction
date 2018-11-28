@@ -533,7 +533,7 @@ class AuctionSolution:
         # Count the leftovers
         leftover_count = problem.item_counts - np.sum(alloc.counts,0)
         leftover = Counter()
-        for i,item in enumerate(problem.items):
+        for i,item in enumerate(problem.item_names):
             if leftover_count[i] > 0:
                 leftover[item] = leftover_count[i]
         # Construct the object
